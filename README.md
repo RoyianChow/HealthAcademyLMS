@@ -125,8 +125,12 @@ BETTER_AUTH_URL=http://localhost:3000
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 
-# Resend (contact form emails)
+# Resend (email OTP)
 RESEND_API_KEY=
+# Sender for OTP emails — must be on a domain verified in Resend.
+# The default onboarding@resend.dev sandbox sender only delivers to the
+# Resend account owner, so real users will never receive sign-in codes.
+RESEND_FROM_EMAIL="Health Academy <no-reply@yourdomain.com>"
 
 # Arcjet (security)
 ARCJET_KEY=
