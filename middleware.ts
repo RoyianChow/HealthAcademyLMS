@@ -1,40 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionCookie } from "better-auth/cookies";
-import arcjet, { createMiddleware, detectBot } from "@arcjet/next";
-
-const aj = arcjet({
-  key: process.env.ARCJET_KEY!, 
-  rules: [
-    detectBot({
-      mode: "LIVE", 
-      allow: [
-        "CATEGORY:SEARCH_ENGINE",
-        "CATEGORY:MONITOR",
-        "CATEGORY:PREVIEW",
-        "STRIPE_WEBHOOK",
-      ],
-    }),
-  ],
-});
 
 async function authMiddleware(request: NextRequest) {
-  const sessionCookie = getSessionCookie(request);
+  const { pathname } = request.nextUrl;
 
-  if (!sessionCookie) {
-    return NextResponse.redirect(new URL("/login", request.url));
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    const sessionCookie = getSessionCookie(request);
+
+    if (!sessionCookie) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
   }
 
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|api/auth).*)"],
+  matcher: ["/admin/:path*"],
 };
 
-export default createMiddleware(aj, async (request: NextRequest) => {
-  if (request.nextUrl.pathname.startsWith("/admin")) {
-    return authMiddleware(request);
+export default function middleware(request: NextRequest) {
+  // The matcher already restricts this to /admin routes in production, but
+  // guard explicitly so the behaviour holds when called directly (tests).
+  const { pathname } = request.nextUrl;
+
+  if (pathname !== "/admin" && !pathname.startsWith("/admin/")) {
+    return NextResponse.next();
   }
 
-  return NextResponse.next();
-});
+  return authMiddleware(request);
+}

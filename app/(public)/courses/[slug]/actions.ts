@@ -1,27 +1,17 @@
 "use server";
 
-import arcjet, { fixedWindow } from "@/lib/arcjet";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { stripe } from "@/lib/stripe";
 import { auth } from "@/lib/auth";
-import { request } from "@arcjet/next";
 import { headers } from "next/headers";
 import Stripe from "stripe";
-
-const aj = arcjet.withRule(
-  fixedWindow({
-    mode: "LIVE",
-    window: "1m",
-    max: 5,
-  })
-);
 
 type EnrollInCourseResponse =
   | {
       status: "success";
       message: string;
-      checkoutUrl?: undefined;
+      checkoutUrl?: string;
     }
   | {
       status: "error";
@@ -32,11 +22,6 @@ type EnrollInCourseResponse =
       status: "unauthenticated";
       message: string;
       checkoutUrl?: undefined;
-    }
-  | {
-      status: "success";
-      message: string;
-      checkoutUrl: string;
     };
 
 export async function enrollInCourseAction(
@@ -56,18 +41,6 @@ export async function enrollInCourseAction(
   const user = session.user;
 
   try {
-    const req = await request();
-    const decision = await aj.protect(req, {
-      fingerprint: user.id,
-    });
-
-    if (decision.isDenied()) {
-      return {
-        status: "error",
-        message: "You have been blocked",
-      };
-    }
-
     const course = await prisma.course.findUnique({
       where: {
         id: courseId,
@@ -86,6 +59,36 @@ export async function enrollInCourseAction(
         status: "error",
         message: "Course not found",
       };
+    }
+
+    // Courses migrated from WordPress were saved with a
+    // "MIGRATION_PENDING_<id>" placeholder instead of a real Stripe price,
+    // which makes checkout creation fail with "No such price". Create the
+    // real Stripe product/price on first purchase attempt and persist it.
+    let stripePriceId = course.stripePriceId;
+
+    if (!stripePriceId || stripePriceId.startsWith("MIGRATION_PENDING")) {
+      if (course.price <= 0) {
+        return {
+          status: "error",
+          message: "This course is not available for purchase yet.",
+        };
+      }
+
+      const stripeProduct = await stripe.products.create({
+        name: course.title,
+        default_price_data: {
+          currency: "usd",
+          unit_amount: Math.round(course.price * 100),
+        },
+      });
+
+      stripePriceId = stripeProduct.default_price as string;
+
+      await prisma.course.update({
+        where: { id: course.id },
+        data: { stripePriceId },
+      });
     }
 
     let stripeCustomerId: string;
@@ -122,7 +125,7 @@ export async function enrollInCourseAction(
       });
     }
 
-    const result = await prisma.$transaction(async (tx) => {
+    const enrollment = await prisma.$transaction(async (tx) => {
       const existingEnrollment = await tx.enrollment.findUnique({
         where: {
           userId_courseId: {
@@ -131,65 +134,109 @@ export async function enrollInCourseAction(
           },
         },
         select: {
-          status: true,
           id: true,
+          status: true,
         },
       });
 
       if (existingEnrollment?.status === "Active") {
-        return {
-          status: "success" as const,
-          message: "You are already enrolled in this course",
-        };
+        return null;
       }
 
-      const enrollment = existingEnrollment
-        ? await tx.enrollment.update({
-            where: {
-              id: existingEnrollment.id,
-            },
-            data: {
-              amount: course.price,
-              status: "Pending",
-              updatedAt: new Date(),
-            },
-          })
-        : await tx.enrollment.create({
-            data: {
-              userId: user.id,
-              courseId: course.id,
-              amount: course.price,
-              status: "Pending",
-            },
-          });
-
-      const checkoutSession = await stripe.checkout.sessions.create({
-        customer: stripeCustomerId,
-        line_items: [
-          {
-            price: course.stripePriceId,
-            quantity: 1,
+      if (existingEnrollment) {
+        return tx.enrollment.update({
+          where: {
+            id: existingEnrollment.id,
           },
-        ],
-        mode: "payment",
-        success_url: `${env.BETTER_AUTH_URL}/payment/success`,
-        cancel_url: `${env.BETTER_AUTH_URL}/payment/cancel`,
-        metadata: {
+          data: {
+            amount: course.price,
+            status: "Pending",
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      return tx.enrollment.create({
+        data: {
           userId: user.id,
           courseId: course.id,
-          enrollmentId: enrollment.id,
+          amount: course.price,
+          status: "Pending",
         },
       });
-
-      return {
-        status: "success" as const,
-        message: "Redirecting to checkout...",
-        checkoutUrl: checkoutSession.url as string,
-      };
     });
 
-    return result;
+    if (!enrollment) {
+      return {
+        status: "success",
+        message: "You are already enrolled in this course",
+      };
+    }
+
+    const checkoutParams: Stripe.Checkout.SessionCreateParams = {
+      customer: stripeCustomerId,
+      line_items: [
+        {
+          price: stripePriceId,
+          quantity: 1,
+        },
+      ],
+      mode: "payment",
+      success_url: `${env.BETTER_AUTH_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${env.BETTER_AUTH_URL}/payment/cancel`,
+      metadata: {
+        userId: user.id,
+        courseId: course.id,
+        enrollmentId: enrollment.id,
+      },
+    };
+
+    let checkoutSession: Stripe.Checkout.Session;
+
+    try {
+      // Collect sales tax (HST/GST for Canadian buyers) via Stripe Tax.
+      // Requires Stripe Tax to be activated in the Stripe dashboard.
+      checkoutSession = await stripe.checkout.sessions.create({
+        ...checkoutParams,
+        automatic_tax: { enabled: true },
+        billing_address_collection: "required",
+        customer_update: { address: "auto" },
+      });
+    } catch (error) {
+      const isTaxConfigError =
+        error instanceof Stripe.errors.StripeInvalidRequestError &&
+        (error.param?.includes("automatic_tax") ||
+          error.message.toLowerCase().includes("tax"));
+
+      if (!isTaxConfigError) {
+        throw error;
+      }
+
+      // Stripe Tax is not activated on this account yet. Keep checkout
+      // working without tax rather than blocking purchases entirely.
+      console.error(
+        "STRIPE_TAX_NOT_CONFIGURED: HST is NOT being collected. Activate Stripe Tax in the Stripe dashboard (Settings -> Tax) to charge HST at checkout.",
+        error.message
+      );
+
+      checkoutSession = await stripe.checkout.sessions.create(checkoutParams);
+    }
+
+    if (!checkoutSession.url) {
+      return {
+        status: "error",
+        message: "Could not create checkout session.",
+      };
+    }
+
+    return {
+      status: "success",
+      message: "Redirecting to checkout...",
+      checkoutUrl: checkoutSession.url,
+    };
   } catch (error) {
+    console.error("Enroll in course error:", error);
+
     if (error instanceof Stripe.errors.StripeError) {
       return {
         status: "error",

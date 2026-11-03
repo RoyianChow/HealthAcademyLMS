@@ -1,66 +1,105 @@
 "use client";
 
-import { EnrolledCourseType } from "@/app/data/user/get-enrolled-courses";
+import type { EnrolledCourseType } from "@/app/data/user/get-enrolled-courses";
+import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight, BookOpen, MessageCircle } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-
 import { useConstructUrl } from "@/hooks/use-construct-url";
-import { useCourseProgress } from "@/hooks/use-course-progress";
+import { cn } from "@/lib/utils";
 
-import Image from "next/image";
-import Link from "next/link";
-
-interface iAppProps {
+type CourseProgressCardProps = {
   data: EnrolledCourseType;
-}
+};
 
-export function CourseProgressCard({ data }: iAppProps) {
-  const thumbnailUrl = useConstructUrl(data.Course.fileKey);
-  const { totalLessons, completedLessons, progressPercentage } =
-    useCourseProgress({ courseData: data.Course as any });
+export function CourseProgressCard({ data }: CourseProgressCardProps) {
+  const thumbnailUrl = useConstructUrl(data.fileKey);
+
+  const { totalLessons, completedLessons, progressPercentage } = data.progress;
+  const safeProgress = Math.min(Math.max(progressPercentage, 0), 100);
+
   return (
-    <Card className="group relative py-0 gap-0">
-      <Badge className="absolute top-2 right-2 z-10">{data.Course.level}</Badge>
+    <Card className="group overflow-hidden rounded-2xl border bg-card py-0 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+      <div className="relative aspect-video w-full overflow-hidden bg-muted">
+        <Badge className="absolute right-3 top-3 z-10 rounded-full shadow-sm">
+          {data.level}
+        </Badge>
 
-      <Image
-        width={600}
-        height={400}
-        className="w-full rounded-t-xl aspect-video h-full object-cover"
-        src={thumbnailUrl}
-        alt="Thumbail Image of Course"
-      />
-
-      <CardContent className="p-4">
-        <Link
-          className="font-medium text-lg line-clamp-2 hover:underline group-hover:text-primary transition-colors"
-          href={`/dashboard/${data.Course.slug}`}
-        >
-          {data.Course.title}
-        </Link>
-        <p className="line-clamp-2 text-sm text-muted-foreground leading-tight mt-2">
-          {data.Course.smallDescription}
-        </p>
-
-        <div className="space-y-4 mt-5">
-          <div className="flex justify-between mb-1 text-sm">
-            <p>Progress:</p>
-            <p className="font-medium">{progressPercentage}%</p>
+        {thumbnailUrl ? (
+          <Image
+            src={thumbnailUrl}
+            alt={`${data.title} course thumbnail`}
+            fill
+            sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+            className="object-cover transition duration-500 group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-muted">
+            <BookOpen className="size-10 text-muted-foreground" />
           </div>
-          <Progress value={progressPercentage} className="h-1.5" />
+        )}
+      </div>
 
-          <p className="text-xs text-muted-foreground mt-1">
-            {completedLessons} of {totalLessons} lessons completed
-          </p>
+      <CardContent className="flex h-full flex-col p-5">
+        <div className="flex-1 space-y-3">
+          <h3 className="line-clamp-2 text-lg font-semibold tracking-tight">
+            {data.title}
+          </h3>
+
+          {data.smallDescription ? (
+            <p className="line-clamp-2 text-sm leading-6 text-muted-foreground">
+              {data.smallDescription}
+            </p>
+          ) : (
+            <p className="text-sm leading-6 text-muted-foreground">
+              No course description available.
+            </p>
+          )}
+
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between text-sm">
+              <p className="text-muted-foreground">Progress</p>
+              <p className="font-semibold">{safeProgress}%</p>
+            </div>
+
+            <Progress value={safeProgress} className="h-2" aria-label="Course progress" />
+
+            <p className="text-xs text-muted-foreground">
+              {completedLessons} of {totalLessons} lessons completed
+            </p>
+          </div>
         </div>
 
-        <Link
-          href={`/dashboard/${data.Course.slug}`}
-          className={buttonVariants({ className: "w-full mt-4" })}
-        >
-          Learn More
-        </Link>
+        <div className="mt-5 grid gap-2 sm:grid-cols-2">
+          <Link
+            href={`/dashboard/${data.slug}/community`}
+            className={cn(
+              buttonVariants({
+                variant: "outline",
+                className: "w-full rounded-full",
+              })
+            )}
+          >
+            <MessageCircle className="mr-2 size-4" />
+            Community
+          </Link>
+
+          <Link
+            href={`/dashboard/${data.slug}`}
+            className={cn(
+              buttonVariants({
+                className: "w-full rounded-full",
+              })
+            )}
+          >
+            Continue
+            <ArrowRight className="ml-2 size-4 transition-transform group-hover:translate-x-1" />
+          </Link>
+        </div>
       </CardContent>
     </Card>
   );

@@ -1,7 +1,6 @@
 "use server";
 
 import { requireAdmin } from "@/app/data/admin/require-admin";
-import arcjet, { fixedWindow } from "@/lib/arcjet";
 import { prisma } from "@/lib/db";
 import { ApiResponse } from "@/lib/types";
 import {
@@ -10,44 +9,18 @@ import {
   courseSchema,
   CourseSchemaType,
   lessonSchema,
+  type LessonSchemaType,
+  type LessonDocumentSchemaType,
 } from "@/lib/zodSchemas";
-import { request } from "@arcjet/next";
 import { revalidatePath } from "next/cache";
-
-const aj = arcjet.withRule(
-  fixedWindow({
-    mode: "LIVE",
-    window: "1m",
-    max: 5,
-  })
-);
 
 export async function editCourse(
   data: CourseSchemaType,
   courseId: string
 ): Promise<ApiResponse> {
-  const user = await requireAdmin();
+  await requireAdmin();
 
   try {
-    const req = await request();
-    const decision = await aj.protect(req, {
-      fingerprint: user.user.id,
-    });
-
-    if (decision.isDenied()) {
-      if (decision.reason.isRateLimit()) {
-        return {
-          status: "error",
-          message: "You have been blocked due to rate limiting",
-        };
-      } else {
-        return {
-          status: "error",
-          message: "You are a bot! if this is a mistake contact our support",
-        };
-      }
-    }
-
     const result = courseSchema.safeParse(data);
 
     if (!result.success) {
@@ -60,7 +33,6 @@ export async function editCourse(
     await prisma.course.update({
       where: {
         id: courseId,
-        userId: user.user.id,
       },
       data: {
         ...result.data,
@@ -85,6 +57,7 @@ export async function reorderLessons(
   courseId: string
 ): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     if (!lessons || lessons.length === 0) {
       return {
@@ -93,11 +66,21 @@ export async function reorderLessons(
       };
     }
 
-    const updates = lessons.map((lesson) =>
+    const tempUpdates = lessons.map((lesson) =>
       prisma.lesson.update({
         where: {
           id: lesson.id,
-          chapterId: chapterId,
+        },
+        data: {
+          position: -lesson.position,
+        },
+      })
+    );
+
+    const finalUpdates = lessons.map((lesson) =>
+      prisma.lesson.update({
+        where: {
+          id: lesson.id,
         },
         data: {
           position: lesson.position,
@@ -105,7 +88,7 @@ export async function reorderLessons(
       })
     );
 
-    await prisma.$transaction(updates);
+    await prisma.$transaction([...tempUpdates, ...finalUpdates]);
 
     revalidatePath(`/admin/courses/${courseId}/edit`);
 
@@ -113,7 +96,9 @@ export async function reorderLessons(
       status: "success",
       message: "Lessons reordered successfully",
     };
-  } catch {
+  } catch (error) {
+    console.error("REORDER_LESSONS_ERROR:", error);
+
     return {
       status: "error",
       message: "Failed to reorder lessons.",
@@ -126,6 +111,7 @@ export async function reorderChapters(
   chapters: { id: string; position: number }[]
 ): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     if (!chapters || chapters.length === 0) {
       return {
@@ -134,11 +120,21 @@ export async function reorderChapters(
       };
     }
 
-    const updates = chapters.map((chapter) =>
+    const tempUpdates = chapters.map((chapter) =>
       prisma.chapter.update({
         where: {
           id: chapter.id,
-          courseId: courseId,
+        },
+        data: {
+          position: -chapter.position,
+        },
+      })
+    );
+
+    const finalUpdates = chapters.map((chapter) =>
+      prisma.chapter.update({
+        where: {
+          id: chapter.id,
         },
         data: {
           position: chapter.position,
@@ -146,7 +142,7 @@ export async function reorderChapters(
       })
     );
 
-    await prisma.$transaction(updates);
+    await prisma.$transaction([...tempUpdates, ...finalUpdates]);
 
     revalidatePath(`/admin/courses/${courseId}/edit`);
 
@@ -154,7 +150,9 @@ export async function reorderChapters(
       status: "success",
       message: "Chapters reordered successfully",
     };
-  } catch {
+  } catch (error) {
+    console.error("REORDER_CHAPTERS_ERROR:", error);
+
     return {
       status: "error",
       message: "Failed to reorder chapters",
@@ -166,6 +164,7 @@ export async function createChapter(
   values: ChapterSchemaType
 ): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     const result = chapterSchema.safeParse(values);
 
@@ -191,7 +190,7 @@ export async function createChapter(
 
       await tx.chapter.create({
         data: {
-          title: result.data.name,
+          title: result.data.title,
           courseId: result.data.courseId,
           position: (maxPos?.position ?? 0) + 1,
         },
@@ -213,23 +212,28 @@ export async function createChapter(
 }
 
 export async function createLesson(
-  values: ChapterSchemaType
+  values: LessonSchemaType
 ): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     const result = lessonSchema.safeParse(values);
 
     if (!result.success) {
+      console.log(result.error.flatten());
+
       return {
         status: "error",
-        message: "Invalid Data",
+        message: "Invalid lesson data",
       };
     }
+
+    const data = result.data;
 
     await prisma.$transaction(async (tx) => {
       const maxPos = await tx.lesson.findFirst({
         where: {
-          chapterId: result.data.chapterId,
+          chapterId: data.chapterId,
         },
         select: {
           position: true,
@@ -239,29 +243,60 @@ export async function createLesson(
         },
       });
 
-      await tx.lesson.create({
+      const validVideos = (data.videos ?? []).filter(
+        (video) => video.videoKey || video.youtubeUrl
+      );
+
+      const createdLesson = await tx.lesson.create({
         data: {
-          title: result.data.name,
-          description: result.data.description,
-          videoKey: result.data.videoKey,
-          youtubeUrl: result.data.youtubeUrl,
-          thumbnailKey: result.data.thumbnailKey,
-          chapterId: result.data.chapterId,
+          title: data.title,
+          description: data.description || null,
+          content: data.content || null,
+          thumbnailKey: data.thumbnailKey || null,
+          chapterId: data.chapterId,
           position: (maxPos?.position ?? 0) + 1,
+          isPublished: data.isPublished ?? false,
+          isFreePreview: data.isFreePreview ?? false,
+          videos: {
+            create: validVideos.map((video, idx) => ({
+              title: video.title || null,
+              videoKey: video.videoKey || null,
+              youtubeUrl: video.youtubeUrl || null,
+              position: idx,
+            })),
+          },
         },
       });
+
+      const documents: LessonDocumentSchemaType[] = data.documents ?? [];
+
+      if (documents.length > 0) {
+        await tx.lessonDocument.createMany({
+          data: documents.map((doc) => ({
+            name: doc.name,
+            fileKey: doc.fileKey,
+            fileUrl: doc.fileUrl ?? null,
+            fileType: doc.fileType ?? null,
+            fileSize: doc.fileSize ?? null,
+            lessonId: createdLesson.id,
+          })),
+        });
+      }
     });
 
-    revalidatePath(`/admin/courses/${result.data.courseId}/edit`);
+    revalidatePath(`/admin/courses/${data.courseId}/edit`);
 
     return {
       status: "success",
       message: "Lesson created successfully",
     };
-  } catch {
+  } catch (error) {
+    console.error("CREATE_LESSON_ERROR", error);
+
     return {
       status: "error",
-      message: "Failed to create lesson",
+      message:
+        error instanceof Error ? error.message : "Failed to create lesson",
     };
   }
 }
@@ -276,6 +311,7 @@ export async function deleteLesson({
   lessonId: string;
 }): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     const chapterWithLessons = await prisma.chapter.findUnique({
       where: {
@@ -322,14 +358,15 @@ export async function deleteLesson({
     });
 
     await prisma.$transaction([
-      ...updates,
       prisma.lesson.delete({
         where: {
           id: lessonId,
           chapterId: chapterId,
         },
       }),
+      ...updates,
     ]);
+
     revalidatePath(`/admin/courses/${courseId}/edit`);
 
     return {
@@ -352,13 +389,14 @@ export async function deleteChapter({
   courseId: string;
 }): Promise<ApiResponse> {
   await requireAdmin();
+
   try {
     const courseWithChapters = await prisma.course.findUnique({
       where: {
         id: courseId,
       },
       select: {
-        chapter: {
+        chapters: {
           orderBy: {
             position: "asc",
           },
@@ -377,7 +415,7 @@ export async function deleteChapter({
       };
     }
 
-    const chapters = courseWithChapters.chapter;
+    const chapters = courseWithChapters.chapters;
 
     const chapterToDelete = chapters.find((chap) => chap.id === chapterId);
 
@@ -398,13 +436,14 @@ export async function deleteChapter({
     });
 
     await prisma.$transaction([
-      ...updates,
       prisma.chapter.delete({
         where: {
           id: chapterId,
         },
       }),
+      ...updates,
     ]);
+
     revalidatePath(`/admin/courses/${courseId}/edit`);
 
     return {
@@ -415,6 +454,50 @@ export async function deleteChapter({
     return {
       status: "error",
       message: "Failed to delete chapter",
+    };
+  }
+}
+
+export async function editChapter({
+  chapterId,
+  courseId,
+  title,
+}: {
+  chapterId: string;
+  courseId: string;
+  title: string;
+}): Promise<ApiResponse> {
+  await requireAdmin();
+
+  try {
+    if (!title || title.trim() === "") {
+      return {
+        status: "error",
+        message: "Chapter title cannot be empty",
+      };
+    }
+
+    await prisma.chapter.update({
+      where: {
+        id: chapterId,
+      },
+      data: {
+        title: title,
+      },
+    });
+
+    revalidatePath(`/admin/courses/${courseId}/edit`);
+
+    return {
+      status: "success",
+      message: "Chapter updated successfully",
+    };
+  } catch (error) {
+    console.error("EDIT_CHAPTER_ERROR:", error);
+
+    return {
+      status: "error",
+      message: "Failed to update chapter",
     };
   }
 }

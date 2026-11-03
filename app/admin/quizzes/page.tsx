@@ -1,42 +1,27 @@
 import Link from "next/link";
-import { prisma } from "@/lib/db";
-
+import { adminGetQuizList } from "@/app/data/admin/admin-get-quiz-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Plus } from "lucide-react";
+import { DeleteQuizButton } from "./_components/DeleteQuizButton";
+import { QuizAttemptsTable } from "./_components/QuizAttemptsTable";
+import { SidebarStateWrapper } from "@/components/chat/sidebar-state-wrapper";
 
 export default async function AdminQuizzesPage() {
-  const quizzes = await prisma.quiz.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-    include: {
-      course: {
-        select: {
-          id: true,
-          title: true,
-        },
-      },
-      _count: {
-        select: {
-          questions: true,
-        },
-      },
-    },
-  });
+  const quizzes = await adminGetQuizList();
 
   return (
-    <div className="min-h-[calc(100vh-8rem)] space-y-6">
-      {/* Header */}
+    <SidebarStateWrapper className="min-h-[calc(100vh-8rem)] space-y-6">
+      {/* Restored to original layout structure so size and position remain unchanged */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-4">
-          <h1 className="text-4xl font-bold tracking-tight">Your Quizzes</h1>
-          <p className="text-muted-foreground text-xl">
-            Manage all your quizzes and connect them to courses
+          <h1 className="text-4xl font-bold tracking-tight">Administrate Quizzes</h1>
+          <p className="text-xl text-muted-foreground">
+            Manage all your quizzes and review student quiz results
           </p>
         </div>
 
-        <Button asChild>
+        <Button asChild className="shrink-0">
           <Link href="/admin/quizzes/create">
             Create Quiz
             <Plus className="ml-2 size-4" />
@@ -44,7 +29,6 @@ export default async function AdminQuizzesPage() {
         </Button>
       </div>
 
-      {/* Quiz List */}
       <div className="grid gap-4">
         {quizzes.length === 0 ? (
           <Card>
@@ -54,46 +38,61 @@ export default async function AdminQuizzesPage() {
           </Card>
         ) : (
           quizzes.map((quiz) => (
-            <Link
-              key={quiz.id}
-              href={`/admin/quizzes/${quiz.id}/edit`}
-              className="block"
-            >
-              <Card className="hover:bg-muted/50 transition">
-                <CardContent className="flex items-center justify-between p-6">
-                  <div className="space-y-1">
-                    <h2 className="text-lg font-semibold">
-                      {quiz.title}
-                    </h2>
+            <Card key={quiz.id} className="transition hover:bg-muted/30 overflow-hidden">
+              <CardContent className="space-y-6 p-6">
+                <div className="flex items-start justify-between gap-6">
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-lg font-semibold truncate">{quiz.title}</h2>
 
-                    <p className="text-sm text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground shrink-0">
+                        {quiz.isPublished ? "Published" : "Draft"}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-muted-foreground line-clamp-2">
                       {quiz.description || "No description"}
                     </p>
 
-                    <div className="flex gap-3 text-xs text-muted-foreground">
+                    <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                      <span>Course: {quiz.course?.title ?? "Not linked"}</span>
                       <span>
-                        Course: {quiz.course?.title ?? "Not linked"}
+                        Chapter:{" "}
+                        {quiz.chapter
+                          ? `${quiz.chapter.position}. ${quiz.chapter.title}`
+                          : "Not linked"}
                       </span>
-
+                      <span>Questions: {quiz._count.questions}</span>
+                      <span>Total Attempts: {quiz._count.attempts}</span>
                       <span>
-                        Questions: {quiz._count.questions}
-                      </span>
-
-                      <span>
-                        {quiz.isPublished ? "Published" : "Draft"}
+                        Created: {new Date(quiz.createdAt).toLocaleDateString()}
                       </span>
                     </div>
                   </div>
 
-                  <div className="text-sm text-muted-foreground">
-                    {new Date(quiz.createdAt).toLocaleDateString()}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button asChild variant="outline" size="sm">
+                      <Link href={`/admin/quizzes/${quiz.id}/edit`}>
+                        Edit Quiz
+                      </Link>
+                    </Button>
+
+                    <DeleteQuizButton quizId={quiz.id} />
                   </div>
-                </CardContent>
-              </Card>
-            </Link>
+                </div>
+
+                <div className="rounded-xl border overflow-hidden">
+                  <div className="border-b bg-muted/40 px-4 py-3">
+                    <h3 className="font-medium">Student Results</h3>
+                  </div>
+
+                  <QuizAttemptsTable quizId={quiz.id} />
+                </div>
+              </CardContent>
+            </Card>
           ))
         )}
       </div>
-    </div>
+    </SidebarStateWrapper>
   );
 }

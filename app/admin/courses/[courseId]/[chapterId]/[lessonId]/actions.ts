@@ -1,39 +1,38 @@
-  "use server";
+"use server";
 
-  import { requireAdmin } from "@/app/data/admin/require-admin";
-  import { prisma } from "@/lib/db";
-  import { ApiResponse } from "@/lib/types";
-  import { lessonSchema, LessonSchemaType } from "@/lib/zodSchemas";
+import { requireAdmin } from "@/app/data/admin/require-admin";
+import { prisma } from "@/lib/db";
+import { ApiResponse } from "@/lib/types";
+import { revalidatePath } from "next/cache";
 
-  export async function updateLesson(
-    values: LessonSchemaType,
-    lessonId: string
-  ): Promise<ApiResponse> {
-    await requireAdmin();
+import {
+  lessonSchema,
+  type LessonSchemaType,
+  type LessonDocumentSchemaType,
+} from "@/lib/zodSchemas";
 
-    try {
-      const result = lessonSchema.safeParse(values);
+export async function updateLesson(
+  values: LessonSchemaType,
+  lessonId: string
+): Promise<ApiResponse> {
+  await requireAdmin();
 
-      if (!result.success) {
-        return {
-          status: "error",
-          message: "Invalid data",
-        };
-      }
+  try {
+    const result = lessonSchema.safeParse(values);
 
-      const data = result.data;
+    if (!result.success) {
+      console.log(result.error.flatten());
+      return { status: "error", message: "Invalid lesson data" };
+    }
 
-      // 🔥 Remove old documents
-      await prisma.lessonDocument.deleteMany({
-        where: {
-          lessonId,
-        },
-      });
+    const data = result.data;
 
-      // 🔥 Add new documents
-      if (data.documents && data.documents.length > 0) {
-        await prisma.lessonDocument.createMany({
-          data: data.documents.map((doc) => ({
+    await prisma.$transaction(async (tx) => {
+      await tx.lessonDocument.deleteMany({ where: { lessonId } });
+      const documents: LessonDocumentSchemaType[] = data.documents ?? [];
+      if (documents.length > 0) {
+        await tx.lessonDocument.createMany({
+          data: documents.map((doc) => ({
             name: doc.name,
             fileKey: doc.fileKey,
             fileUrl: doc.fileUrl ?? null,
@@ -44,30 +43,48 @@
         });
       }
 
-      // 🔥 Update lesson
-      await prisma.lesson.update({
-        where: {
-          id: lessonId,
-        },
+      await tx.lessonVideo.deleteMany({ where: { lessonId } });
+      const videos = data.videos ?? [];
+      if (videos.length > 0) {
+        const validVideos = videos.filter(v => v.videoKey || v.youtubeUrl);
+        
+        if (validVideos.length > 0) {
+          await tx.lessonVideo.createMany({
+            data: validVideos.map((vid, index) => ({
+              title: vid.title || null,
+              videoKey: vid.videoKey || null,
+              youtubeUrl: vid.youtubeUrl || null,
+              position: index,
+              lessonId,
+            })),
+          });
+        }
+      }
+
+      await tx.lesson.update({
+        where: { id: lessonId },
         data: {
-          title: data.name,
-          description: data.description ?? null,
-          thumbnailKey: data.thumbnailKey ?? null,
-          videoKey: data.videoKey ?? null,
-          youtubeUrl: data.youtubeUrl ?? null,
+          title: data.title,
+          description: data.description || null,
+          content: data.content || null,
+          thumbnailKey: data.thumbnailKey || null,
+          isPublished: data.isPublished ?? false,
+          isFreePreview: data.isFreePreview ?? false,
+          interactiveScript: data.interactiveScript || null,
         },
       });
+    });
 
-      return {
-        status: "success",
-        message: "Lesson updated successfully",
-      };
-    } catch (error) {
-      console.error(error);
+    revalidatePath(`/admin/courses/${data.courseId}/edit`);
 
-      return {
-        status: "error",
-        message: "Failed to update lesson",
-      };
-    }
+    return { status: "success", message: "Lesson updated successfully" };
+  } catch (error) {
+    console.error("UPDATE_LESSON_ERROR", error);
+
+    return {
+      status: "error",
+      message:
+        error instanceof Error ? error.message : "Failed to update lesson",
+    };
   }
+}

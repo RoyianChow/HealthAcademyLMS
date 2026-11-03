@@ -1,7 +1,8 @@
-import "server-only";
-import { requireUser } from "../user/require-user";
+// app\data\course\get-lesson-content.ts
 import { prisma } from "@/lib/db";
+import { requireUser } from "../user/require-user";
 import { notFound } from "next/navigation";
+import { EnrollmentStatus } from "@/src/generated/prisma/client";
 
 export async function getLessonContent(lessonId: string) {
   const session = await requireUser();
@@ -14,24 +15,34 @@ export async function getLessonContent(lessonId: string) {
       id: true,
       title: true,
       description: true,
+      content: true,
       thumbnailKey: true,
-      videoKey: true,
-      youtubeUrl:true,
+      interactiveScript: true,
+      videos: {
+        select: {
+          id: true,
+          title: true,
+          videoKey: true,
+          youtubeUrl: true,
+          position: true,
+        },
+        orderBy: {
+          position: "asc",
+        },
+      },
       documents: true,
       position: true,
+      isPublished: true,
+      isFreePreview: true,
       lessonProgress: {
         where: {
           userId: session.id,
         },
-        select: {
-          completed: true,
-          lessonId: true,
-        },
       },
-      Chapter: {
+      chapter: {
         select: {
           courseId: true,
-          Course: {
+          course: {
             select: {
               slug: true,
             },
@@ -49,7 +60,7 @@ export async function getLessonContent(lessonId: string) {
     where: {
       userId_courseId: {
         userId: session.id,
-        courseId: lesson.Chapter.courseId,
+        courseId: lesson.chapter.courseId,
       },
     },
     select: {
@@ -57,9 +68,17 @@ export async function getLessonContent(lessonId: string) {
     },
   });
 
-  if (!enrollment || enrollment.status !== "Active") {
+  const isAdmin = session.role === "admin";
+  const hasActiveEnrollment = enrollment && enrollment.status === EnrollmentStatus.Active;
+
+  if (!isAdmin && !hasActiveEnrollment && !lesson.isFreePreview) {
     return notFound();
   }
+
+  if (!isAdmin && !lesson.isPublished && !lesson.isFreePreview) {
+    return notFound();
+  }
+
   return lesson;
 }
 

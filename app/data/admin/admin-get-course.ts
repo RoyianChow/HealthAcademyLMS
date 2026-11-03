@@ -1,4 +1,3 @@
-import "server-only";
 import { requireAdmin } from "./require-admin";
 import { prisma } from "@/lib/db";
 import { notFound } from "next/navigation";
@@ -8,7 +7,7 @@ export async function adminGetCourse(id: string) {
 
   const data = await prisma.course.findUnique({
     where: {
-      id: id,
+      id,
     },
     select: {
       id: true,
@@ -22,7 +21,7 @@ export async function adminGetCourse(id: string) {
       slug: true,
       smallDescription: true,
       category: true,
-      chapter: {
+      chapters: {
         select: {
           id: true,
           title: true,
@@ -34,10 +33,33 @@ export async function adminGetCourse(id: string) {
               description: true,
               thumbnailKey: true,
               position: true,
-              videoKey: true,
-              youtubeUrl:true,
+              videos: {
+                select: {
+                  id: true,
+                  title: true,
+                  videoKey: true,
+                  youtubeUrl: true,
+                  position: true,
+                },
+                orderBy: {
+                  position: "asc",
+                },
+              },
+            },
+            orderBy: {
+              position: "asc",
+                },
+              },
+          quizzes: {
+            select: {
+              id: true,
+              title: true,
+              isPublished: true,
             },
           },
+        },
+        orderBy: {
+          position: "asc",
         },
       },
     },

@@ -5,68 +5,72 @@ import { z } from "zod";
 import { v4 as uuidv4 } from "uuid";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { S3 } from "@/lib/S3Client";
-import arcjet, { fixedWindow } from "@/lib/arcjet";
 import { requireAdmin } from "@/app/data/admin/require-admin";
+
+const maxUploadBytes = 50 * 1024 * 1024;
 
 const fileUploadSchema = z.object({
   fileName: z.string().min(1, { message: "Filename is required" }),
   contentType: z.string().min(1, { message: "Content type is required" }),
-  size: z.number().min(1, { message: "Size is required" }),
-  isImage: z.boolean(),
+  size: z
+    .number()
+    .min(1, { message: "Size is required" })
+    .max(maxUploadBytes, { message: "File is too large" }),
+  fileType: z.enum(["image", "video", "document"]).optional(),
 });
 
-const aj = arcjet.withRule(
-  fixedWindow({
-    mode: "LIVE",
-    window: "1m",
-    max: 5,
-  })
-);
-
 export async function POST(request: Request) {
-  const session = await requireAdmin();
+  await requireAdmin();
+
   try {
-    const decision = await aj.protect(request, {
-      fingerprint: session?.user.id as string,
-    });
-
-    if (decision.isDenied()) {
-      return NextResponse.json({ error: "dudde not good" }, { status: 429 });
-    }
-
     const body = await request.json();
 
     const validation = fileUploadSchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json(
-        { error: "Invalid Request Body" },
+        {
+          error: "Invalid request body",
+          details: validation.error.flatten(),
+        },
         { status: 400 }
       );
     }
 
-    const { fileName, contentType, size } = validation.data;
+    const { fileName, contentType, size, fileType } = validation.data;
 
-    const uniqueKey = `${uuidv4()}-${fileName}`;
+    const safeFileName = fileName.replace(/[^a-zA-Z0-9.\-_]/g, "-");
+
+    const folder =
+      fileType === "document"
+        ? "lesson-documents"
+        : fileType === "video"
+          ? "lesson-videos"
+          : "images";
+
+    const uniqueKey = `${folder}/${uuidv4()}-${safeFileName}`;
 
     const command = new PutObjectCommand({
       Bucket: env.NEXT_PUBLIC_S3_BUCKET_NAME_IMAGES,
+      Key: uniqueKey,
       ContentType: contentType,
       ContentLength: size,
-      Key: uniqueKey,
     });
 
     const presignedUrl = await getSignedUrl(S3, command, {
-      expiresIn: 360, 
+      expiresIn: 360,
     });
 
-    const response = {
+    return NextResponse.json({
+      url: presignedUrl,
       presignedUrl,
+      fileKey: uniqueKey,
       key: uniqueKey,
-    };
+      fileUrl: `${env.NEXT_PUBLIC_S3_PUBLIC_URL}/${uniqueKey}`,
+    });
+  } catch (error) {
+    console.error("S3_UPLOAD_URL_ERROR:", error);
 
-    return NextResponse.json(response);
-  } catch {
     return NextResponse.json(
       { error: "Failed to generate presigned URL" },
       { status: 500 }

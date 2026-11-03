@@ -1,5 +1,17 @@
-import { env } from "@/lib/env";
+export function useConstructUrl(key?: string | null): string {
+  if (!key) return "";
 
-export function useConstructUrl(key: string): string {
-  return `https://${env.NEXT_PUBLIC_S3_BUCKET_NAME_IMAGES}.fly.storage.tigris.dev/${key}`;
+  const publicUrl = process.env.NEXT_PUBLIC_S3_PUBLIC_URL;
+
+  if (!publicUrl) {
+    console.warn("Missing env: NEXT_PUBLIC_S3_PUBLIC_URL");
+    return "";
+  }
+
+  const safeKey = key
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+
+  return `${publicUrl.replace(/\/$/, "")}/${safeKey}`;
 }

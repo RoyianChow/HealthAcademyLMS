@@ -1,23 +1,15 @@
 import { QuizForm } from "../_components/QuizForm";
-import { prisma } from "../../../../lib/db";
+import { adminGetCoursesForQuizForm } from "@/app/data/admin/admin-get-courses-for-quiz-form";
 
 export default async function CreateQuizPage() {
-  const courses = await prisma.course.findMany({
-    select: {
-      id: true,
-      title: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
+  const courses = await adminGetCoursesForQuizForm();
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6">
       <div className="space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Create Quiz</h1>
         <p className="text-muted-foreground">
-          Create a new quiz and connect it to one of your courses.
+          Create a new quiz and connect it to one of your course chapters.
         </p>
       </div>
 
@@ -28,7 +20,13 @@ export default async function CreateQuizPage() {
           title: "",
           description: "",
           courseId: "",
-          courses, // ✅ THIS FIXES YOUR DROPDOWN
+          chapterId: "",
+          courses,
+          isPublished: false,
+          passingScore: null,
+          timeLimitMinutes: null,
+          allowMultipleAttempts: false,
+          questions: [],
         }}
       />
     </div>

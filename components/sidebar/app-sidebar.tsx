@@ -2,23 +2,19 @@
 
 import * as React from "react";
 import {
-  IconCamera,
-  IconChartBar,
+  IconChecklist,
   IconDashboard,
-  IconFileAi,
-  IconFileDescription,
-  IconFolder,
-  IconHelp,
+  IconGlobe,
   IconListDetails,
-  IconSearch,
-  IconSettings,
-  IconUsers,
+  IconRobot,
+  IconUser,
 } from "@tabler/icons-react";
-import Logo from "@/public/logo.png";
+import Image from "next/image";
+import Link from "next/link";
 
+import Logo from "@/public/logo.png";
 import { NavMain } from "@/components/sidebar/nav-main";
-import { NavSecondary } from "@/components/sidebar/nav-secondary";
-import { NavUser } from "@/components/sidebar/nav-user";
+import { NavUser, type SidebarSessionUser } from "@/components/sidebar/nav-user";
 import {
   Sidebar,
   SidebarContent,
@@ -28,110 +24,70 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import Link from "next/link";
-import Image from "next/image";
 
-const data = {
-  navMain: [
+export function AppSidebar({
+  user,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { user: SidebarSessionUser }) {
+  const navMain = [
     {
       title: "Dashboard",
       url: "/dashboard",
       icon: IconDashboard,
     },
-      {
-      title: "Admin Dashboard",
-      url: "/admin",
-      icon: IconDashboard,
-    },
-    {
-      title: "Courses",
-      url: "/admin/courses",
-      icon: IconListDetails,
-    },
     {
       title: "Quizzes",
-      url: "/admin/quizzes",
-      icon: IconChartBar,
+      url: "/quizzes",
+      icon: IconChecklist,
+      isChild: true,
     },
     {
-      title: "Assignments",
-      url: "/admin/assignments",
-      icon: IconFolder,
+      title: "Profile",
+      url: "/profile",
+      icon: IconUser,
+      isChild: true,
     },
     {
-      title: "Grade",
-      url: "/admin/grade",
-      icon: IconUsers,
-    },
-  ],
-  navClouds: [
-    {
-      title: "Capture",
-      icon: IconCamera,
-      isActive: true,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
+      title: "Community",
+      url: "/dashboard/community",
+      icon: IconGlobe,
+      isChild: true,
     },
     {
-      title: "Proposal",
-      icon: IconFileDescription,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
+      title: "AI Advisor",
+      url: "/chatbot",
+      icon: IconRobot,
+      isChild: true,
     },
-    {
-      title: "Prompts",
-      icon: IconFileAi,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-  ],
-  navSecondary: [
-    {
-      title: "Settings",
-      url: "#",
-      icon: IconSettings,
-    },
-    {
-      title: "Get Help",
-      url: "#",
-      icon: IconHelp,
-    },
-    {
-      title: "Search",
-      url: "#",
-      icon: IconSearch,
-    },
-  ],
-};
+    ...(user.role === "admin"
+      ? [
+          {
+            title: "Admin Dashboard",
+            url: "/admin",
+            icon: IconDashboard,
+          },
+          {
+            title: "Admin Courses",
+            url: "/admin/courses",
+            icon: IconListDetails,
+            isChild: true,
+          },
+          {
+            title: "Admin Quizzes",
+            url: "/admin/quizzes",
+            icon: IconChecklist,
+            isChild: true,
+          },
+          {
+            title: "Admin Community",
+            url: "/admin/community",
+            icon: IconGlobe,
+            isChild: true,
+          },
+        ]
+      : []),
+  ];
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -142,20 +98,27 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               className="data-[slot=sidebar-menu-button]:!p-1.5"
             >
               <Link href="/">
-                <Image src={Logo} alt="Logo" className="size-5" />
-                <span className="text-base font-semibold">Healthy Academy LMS.</span>
+                <Image
+                  src={Logo}
+                  alt="Health Academy logo"
+                  className="size-5"
+                  priority
+                />
+                <span className="text-base font-semibold">
+                  Health Academy
+                </span>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
-        <NavMain items={data.navMain} />
 
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+      <SidebarContent>
+        <NavMain items={navMain} />
       </SidebarContent>
+
       <SidebarFooter>
-        <NavUser />
+        <NavUser user={user} />
       </SidebarFooter>
     </Sidebar>
   );

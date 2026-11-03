@@ -1,5 +1,6 @@
 import { getIndividualCourse } from "@/app/data/course/get-course";
 import { RenderDescription } from "@/components/rich-text-editor/RenderDescription";
+import { parseDescriptionJson } from "@/lib/tiptap-content";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -22,6 +23,9 @@ import Image from "next/image";
 import { checkIfCourseBought } from "@/app/data/user/user-is-enrolled";
 import Link from "next/link";
 import { EnrollmentButton } from "./_components/EnrollmentButton";
+import { formatCoursePrice } from "@/lib/utils";
+
+export const revalidate = 300;
 import { buttonVariants } from "@/components/ui/button";
 
 type Params = Promise<{ slug: string }>;
@@ -77,7 +81,7 @@ export default async function SlugPage({ params }: { params: Params }) {
               Course Description
             </h2>
 
-            <RenderDescription json={JSON.parse(course.description)} />
+            <RenderDescription json={parseDescriptionJson(course.description)} />
           </div>
         </div>
 
@@ -87,8 +91,8 @@ export default async function SlugPage({ params }: { params: Params }) {
               Course Content
             </h2>
             <div>
-              {course.chapter.length} chapters |{" "}
-              {course.chapter.reduce(
+              {course.chapters.length} chapters |{" "}
+              {course.chapters.reduce(
                 (total, chapter) => total + chapter.lessons.length,
                 0
               ) || 0}{" "}
@@ -97,7 +101,7 @@ export default async function SlugPage({ params }: { params: Params }) {
           </div>
 
           <div className="space-y-4">
-            {course.chapter.map((chapter, index) => (
+            {course.chapters.map((chapter, index) => (
               <Collapsible key={chapter.id} defaultOpen={index === 0}>
                 <Card className="p-0 overflow-hidden border-2 transition-all duration-200 hover:shadow-md gap-0">
                   <CollapsibleTrigger>
@@ -134,25 +138,55 @@ export default async function SlugPage({ params }: { params: Params }) {
                   <CollapsibleContent>
                     <div className="border-t bg-muted/20">
                       <div className="p-6 pt-4 space-y-3">
-                        {chapter.lessons.map((lesson, lessonIndex) => (
-                          <div
-                            key={lesson.id}
-                            className="flex items-center gap-4 rounded-lg p-3 hover:bg-accent transition-colors"
-                          >
-                            <div className="flex size-8 items-center justify-center rounded-full bg-background border-2 border-primary/20">
-                              <IconPlayerPlay className="size-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                            </div>
+                        {chapter.lessons.map((lesson, lessonIndex) => {
+                          const showPreviewLink = lesson.isFreePreview && !isEnrolled;
 
-                            <div className="flex-1">
-                              <p className="font-medium text-sm">
-                                {lesson.title}
-                              </p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Lesson {lessonIndex + 1}
-                              </p>
+                          const lessonContent = (
+                            <div className="flex items-center justify-between w-full">
+                              <div className="flex items-center gap-4 text-left">
+                                <div className="flex size-8 items-center justify-center rounded-full bg-background border-2 border-primary/20">
+                                  <IconPlayerPlay className="size-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                                </div>
+
+                                <div>
+                                  <p className="font-medium text-sm">
+                                    {lesson.title}
+                                  </p>
+                                  <p className="text-xs text-muted-foreground mt-1">
+                                    Lesson {lessonIndex + 1}
+                                  </p>
+                                </div>
+                              </div>
+
+                              {lesson.isFreePreview && (
+                                <Badge variant="secondary" className="text-xs font-medium bg-green-500/10 text-green-600 hover:bg-green-500/20 border-none">
+                                  Preview
+                                </Badge>
+                              )}
                             </div>
-                          </div>
-                        ))}
+                          );
+
+                          if (showPreviewLink) {
+                            return (
+                              <Link
+                                key={lesson.id}
+                                href={`/dashboard/${slug}/${lesson.id}`}
+                                className="flex items-center gap-4 rounded-lg p-3 hover:bg-accent transition-colors group cursor-pointer border border-dashed border-transparent hover:border-green-500/20"
+                              >
+                                {lessonContent}
+                              </Link>
+                            );
+                          }
+
+                          return (
+                            <div
+                              key={lesson.id}
+                              className="flex items-center gap-4 rounded-lg p-3 hover:bg-accent transition-colors"
+                            >
+                              {lessonContent}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </CollapsibleContent>
@@ -170,10 +204,7 @@ export default async function SlugPage({ params }: { params: Params }) {
               <div className="flex items-center justify-between mb-6">
                 <span className="text-lg font-medium">Price:</span>
                 <span className="text-2xl font-bold text-primary">
-                  {new Intl.NumberFormat("en-US", {
-                    style: "currency",
-                    currency: "USD",
-                  }).format(course.price)}
+                  {formatCoursePrice(course.price)}
                 </span>
               </div>
 
@@ -223,7 +254,7 @@ export default async function SlugPage({ params }: { params: Params }) {
                     <div>
                       <p className="text-sm font-medium">Total Lessons</p>
                       <p className="text-sm text-muted-foreground">
-                        {course.chapter.reduce(
+                        {course.chapters.reduce(
                           (total, chapter) => total + chapter.lessons.length,
                           0
                         ) || 0}{" "}
@@ -261,7 +292,7 @@ export default async function SlugPage({ params }: { params: Params }) {
               {isEnrolled ? (
                 <Link
                   className={buttonVariants({ className: "w-full" })}
-                  href="/dashboard"
+                  href={`/dashboard/${slug}`}
                 >
                   Watch Course
                 </Link>

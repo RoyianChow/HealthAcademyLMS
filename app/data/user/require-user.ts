@@ -1,4 +1,3 @@
-import "server-only";
 
 import { auth } from "@/lib/auth";
 import { headers } from "next/headers";
@@ -15,4 +14,12 @@ export const requireUser = cache(async () => {
   }
 
   return session.user;
+});
+
+export const getSessionUser = cache(async () => {
+  const session = await auth.api.getSession({
+    headers: await headers(),
+  });
+
+  return session?.user ?? null;
 });
